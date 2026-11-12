@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 import cv2
 import numpy as np
@@ -6,164 +7,539 @@ import pandas as pd
 import mediapipe as mp
 import urllib.request
 from pathlib import Path
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Amazonas Face Analysis", page_icon="📐", layout="wide")
+# ==========================================
+# CONFIGURACIÓN GENERAL
+# ==========================================
+
+st.set_page_config(
+    page_title="Amazonas Face Analysis",
+    page_icon="📐",
+    layout="wide"
+)
 
 MODEL_PATH = Path("face_landmarker.task")
-MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+
+MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "face_landmarker/face_landmarker/float16/1/"
+    "face_landmarker.task"
+)
+
+# ==========================================
+# CARGA DEL MODELO FACIAL
+# ==========================================
 
 @st.cache_resource
 def load_landmarker():
+
     if not MODEL_PATH.exists():
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-    BaseOptions = mp.tasks.BaseOptions
-    FaceLandmarker = mp.tasks.vision.FaceLandmarker
-    FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
-    RunningMode = mp.tasks.vision.RunningMode
-    options = FaceLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=str(MODEL_PATH)),
-        running_mode=RunningMode.IMAGE,
+        urllib.request.urlretrieve(
+            MODEL_URL,
+            MODEL_PATH
+        )
+
+    options = mp.tasks.vision.FaceLandmarkerOptions(
+        base_options=mp.tasks.BaseOptions(
+            model_asset_path=str(MODEL_PATH)
+        ),
+        running_mode=mp.tasks.vision.RunningMode.IMAGE,
         num_faces=1,
         output_face_blendshapes=False,
         output_facial_transformation_matrixes=False
     )
-    return FaceLandmarker.create_from_options(options)
+
+    return mp.tasks.vision.FaceLandmarker.create_from_options(
+        options
+    )
+
+
+# ==========================================
+# LECTURA DE IMÁGENES
+# ==========================================
 
 def read_image(uploaded_file):
-    data = np.frombuffer(uploaded_file.getvalue(), np.uint8)
-    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-    if img is None:
+
+    data = np.frombuffer(
+        uploaded_file.getvalue(),
+        np.uint8
+    )
+
+    image = cv2.imdecode(
+        data,
+        cv2.IMREAD_COLOR
+    )
+
+    if image is None:
         return None
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    return cv2.cvtColor(
+        image,
+        cv2.COLOR_BGR2RGB
+    )
+
+
+# ==========================================
+# CÁLCULO DE DISTANCIAS
+# ==========================================
 
 def distance(a, b):
-    return float(np.linalg.norm(np.array(a[:2]) - np.array(b[:2])))
+
+    return float(
+        np.linalg.norm(
+            np.array(a[:2]) - np.array(b[:2])
+        )
+    )
+
+
+# ==========================================
+# EXTRACCIÓN DE CARACTERÍSTICAS
+# ==========================================
 
 def extract_features(landmarks):
-    # Índices de referencia de MediaPipe Face Mesh; mediciones normalizadas
-    pts = [(lm.x, lm.y, lm.z) for lm in landmarks]
-    face_width = distance(pts[234], pts[454])
-    face_height = distance(pts[10], pts[152])
-    eye_distance = distance(pts[33], pts[263])
-    nose_width = distance(pts[129], pts[358])
-    mouth_width = distance(pts[61], pts[291])
-    nose_length = distance(pts[1], pts[2])
-    jaw_width = distance(pts[172], pts[397])
-    denom = max(face_width, 1e-8)
+
+    points = [
+        (lm.x, lm.y, lm.z)
+        for lm in landmarks
+    ]
+
+    face_width = distance(
+        points[234], points[454]
+    )
+
+    face_height = distance(
+        points[10], points[152]
+    )
+
+    eye_distance = distance(
+        points[33], points[263]
+    )
+
+    nose_width = distance(
+        points[129], points[358]
+    )
+
+    mouth_width = distance(
+        points[61], points[291]
+    )
+
+    nose_length = distance(
+        points[1], points[2]
+    )
+
+    jaw_width = distance(
+        points[172], points[397]
+    )
+
     return {
-        "Ancho facial / alto facial": face_width / max(face_height, 1e-8),
-        "Distancia entre ojos / ancho facial": eye_distance / denom,
-        "Ancho de nariz / ancho facial": nose_width / denom,
-        "Ancho de boca / ancho facial": mouth_width / denom,
-        "Ancho de mandíbula / ancho facial": jaw_width / denom,
-        "Longitud nasal / alto facial": nose_length / max(face_height, 1e-8)
+        "Ancho facial / alto facial":
+            face_width / max(face_height, 1e-8),
+
+        "Distancia entre ojos / ancho facial":
+            eye_distance / max(face_width, 1e-8),
+
+        "Ancho de nariz / ancho facial":
+            nose_width / max(face_width, 1e-8),
+
+        "Ancho de boca / ancho facial":
+            mouth_width / max(face_width, 1e-8),
+
+        "Ancho de mandíbula / ancho facial":
+            jaw_width / max(face_width, 1e-8),
+
+        "Longitud nasal / alto facial":
+            nose_length / max(face_height, 1e-8)
     }
 
+
+# ==========================================
+# DIBUJAR PUNTOS FACIALES
+# ==========================================
+
 def draw_landmarks(image, landmarks):
-    h, w = image.shape[:2]
-    out = image.copy()
+
+    height, width = image.shape[:2]
+
+    output = image.copy()
+
     for lm in landmarks:
-        x, y = int(lm.x*w), int(lm.y*h)
-        cv2.circle(out, (x, y), 1, (40, 220, 100), -1)
-    return out
+
+        x = int(lm.x * width)
+        y = int(lm.y * height)
+
+        if 0 <= x < width and 0 <= y < height:
+
+            cv2.circle(
+                output,
+                (x, y),
+                1,
+                (40, 220, 100),
+                -1
+            )
+
+    return output
+
+
+# ==========================================
+# ANÁLISIS FACIAL
+# ==========================================
 
 def analyze(image):
-    rgb = np.ascontiguousarray(image)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result = load_landmarker().detect(mp_image)
-    if not result.face_landmarks:
-        return None, None
-    landmarks = result.face_landmarks[0]
-    return extract_features(landmarks), draw_landmarks(image, landmarks)
 
-st.title("AMAZONAS FACE ANALYSIS")
-st.caption("Sistema experimental para el análisis y comparación geométrica de rostros")
-st.warning(
-    "Este sistema mide características geométricas de imágenes. No determina ni demuestra "
-    "origen étnico o procedencia geográfica. La pertenencia a una muestra de investigación "
-    "debe registrarse mediante información voluntaria y consentimiento."
+    rgb = np.ascontiguousarray(image)
+
+    mp_image = mp.Image(
+        image_format=mp.ImageFormat.SRGB,
+        data=rgb
+    )
+
+    landmarker = load_landmarker()
+
+    result = landmarker.detect(mp_image)
+
+    if not result.face_landmarks:
+
+        return None, None
+
+    landmarks = result.face_landmarks[0]
+
+    features = extract_features(
+        landmarks
+    )
+
+    annotated = draw_landmarks(
+        image,
+        landmarks
+    )
+
+    return features, annotated
+
+
+# ==========================================
+# INTERFAZ PRINCIPAL
+# ==========================================
+
+st.title("📐 AMAZONAS FACE ANALYSIS")
+
+st.subheader(
+    "Análisis y comparación geométrica de rostros"
 )
 
-with st.sidebar:
-    st.header("Panel de análisis")
-    st.write("**Versión:** Prototipo académico 1.0")
-    st.write("**Motor:** MediaPipe Face Landmarker")
-    st.write("**Método:** proporciones y distancias normalizadas")
-    st.divider()
-    st.write("Las fotografías se procesan durante la sesión. No se guardan automáticamente.")
+st.markdown(
+    """
+    Sistema experimental desarrollado en Python
+    para estudiar características geométricas faciales
+    mediante visión artificial.
+    """
+)
 
-tab1, tab2, tab3 = st.tabs(["📷 Analizar rostro", "📊 Comparar muestra", "ℹ️ Metodología"])
+st.warning(
+    """
+    IMPORTANTE: Este sistema analiza proporciones
+    geométricas de imágenes. No determina el origen
+    étnico ni la procedencia geográfica de una persona.
+    """
+)
+
+# ==========================================
+# PANEL LATERAL
+# ==========================================
+
+with st.sidebar:
+
+    st.header("⚙️ Panel de análisis")
+
+    st.write("Versión: Prototipo académico 1.1")
+
+    st.write("Motor: MediaPipe Face Landmarker")
+
+    st.write("Método: Proporciones geométricas")
+
+    st.divider()
+
+    st.info(
+        "Las fotografías se procesan durante la sesión. "
+        "No se guardan automáticamente."
+    )
+
+
+# ==========================================
+# PESTAÑAS
+# ==========================================
+
+tab1, tab2, tab3 = st.tabs([
+    "📷 Analizar rostro",
+    "📊 Comparar muestra",
+    "ℹ️ Metodología"
+])
+
+
+# ==========================================
+# PESTAÑA 1: ANÁLISIS FACIAL
+# ==========================================
 
 with tab1:
-    st.subheader("Captura o carga de fotografía")
-    source = st.radio("Selecciona cómo ingresar la imagen", ["Tomar fotografía con cámara", "Subir fotografía"], horizontal=True)
-    uploaded = None
-    if source == "Tomar fotografía con cámara":
-        uploaded = st.camera_input("Toma una fotografía frontal")
-    else:
-        uploaded = st.file_uploader("Selecciona una imagen", type=["jpg", "jpeg", "png"])
+
+    st.header("Análisis de características faciales")
+
+    uploaded = st.file_uploader(
+        "Selecciona una fotografía JPG, JPEG o PNG",
+        type=["jpg", "jpeg", "png"],
+        key="face_upload"
+    )
 
     if uploaded is not None:
+
         image = read_image(uploaded)
+
         if image is None:
-            st.error("No se pudo leer la imagen. Prueba con JPG o PNG.")
+
+            st.error(
+                "No se pudo leer la fotografía."
+            )
+
         else:
-            with st.spinner("Detectando puntos faciales y calculando medidas..."):
-                try:
+
+            try:
+
+                with st.spinner(
+                    "Analizando características geométricas..."
+                ):
+
                     features, annotated = analyze(image)
-                    if features is None:
-                        st.error("No se detectó un rostro. Prueba con una fotografía frontal, bien iluminada y sin obstrucciones.")
-                    else:
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.image(image, caption="Fotografía ingresada", use_container_width=True)
-                        with c2:
-                            st.image(annotated, caption="Puntos faciales detectados", use_container_width=True)
-                        st.success("Rostro detectado. Se calcularon las características geométricas.")
-                        df = pd.DataFrame({"Característica": list(features.keys()), "Valor normalizado": list(features.values())})
-                        st.subheader("Mediciones geométricas")
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                        st.bar_chart(df.set_index("Característica"))
-                        st.download_button("Descargar mediciones CSV", df.to_csv(index=False).encode("utf-8"), "mediciones_faciales.csv", "text/csv")
-                except Exception as e:
-                    st.error(f"No se pudo completar el análisis: {e}")
-                    st.info("Comprueba tu conexión a internet la primera vez para descargar el modelo facial.")
+
+                if features is None:
+
+                    st.error(
+                        "No se detectó ningún rostro. "
+                        "Utiliza una fotografía frontal "
+                        "con buena iluminación."
+                    )
+
+                else:
+
+                    st.success(
+                        "Rostro detectado correctamente."
+                    )
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+
+                        st.image(
+                            image,
+                            caption="Fotografía original",
+                            use_container_width=True
+                        )
+
+                    with col2:
+
+                        st.image(
+                            annotated,
+                            caption="Puntos faciales detectados",
+                            use_container_width=True
+                        )
+
+                    st.divider()
+
+                    st.subheader(
+                        "📏 Mediciones geométricas"
+                    )
+
+                    df = pd.DataFrame({
+                        "Característica": list(features.keys()),
+                        "Valor normalizado": list(features.values())
+                    })
+
+                    st.dataframe(
+                        df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    st.subheader(
+                        "📊 Representación gráfica"
+                    )
+
+                    chart_df = df.set_index(
+                        "Característica"
+                    )
+
+                    st.bar_chart(chart_df)
+
+                    csv = df.to_csv(
+                        index=False
+                    ).encode("utf-8-sig")
+
+                    st.download_button(
+                        label="⬇️ Descargar resultados CSV",
+                        data=csv,
+                        file_name="mediciones_faciales.csv",
+                        mime="text/csv"
+                    )
+
+            except Exception as error:
+
+                st.error(
+                    f"Error durante el análisis: {error}"
+                )
+
+                st.info(
+                    "Comprueba las dependencias y la conexión "
+                    "necesaria para descargar el modelo facial."
+                )
+
+
+# ==========================================
+# PESTAÑA 2: COMPARACIÓN DE MUESTRAS
+# ==========================================
 
 with tab2:
-    st.subheader("Comparación geométrica de una muestra")
-    st.write(
-        "Carga un CSV con mediciones geométricas previamente obtenidas de voluntarios que "
-        "hayan consentido participar. Cada fila debe representar una imagen codificada y "
-        "contener las mismas variables que aparecen en la pestaña de análisis."
+
+    st.header(
+        "Comparación estadística de una muestra"
     )
-    st.caption("No incluyas nombres, documentos, datos sensibles ni información que permita identificar a los voluntarios.")
-    sample = st.file_uploader("Cargar CSV de muestra (opcional)", type=["csv"], key="sample")
-    if sample:
+
+    st.write(
+        """
+        Carga un archivo CSV que contenga mediciones
+        geométricas de imágenes de referencia obtenidas
+        con consentimiento de los voluntarios.
+        """
+    )
+
+    sample = st.file_uploader(
+        "Seleccionar archivo CSV",
+        type=["csv"],
+        key="sample_upload"
+    )
+
+    if sample is not None:
+
         try:
+
             data = pd.read_csv(sample)
-            st.dataframe(data.head(20), use_container_width=True)
-            numeric = data.select_dtypes(include=np.number)
+
+            st.subheader(
+                "Datos de la muestra"
+            )
+
+            st.dataframe(
+                data.head(20),
+                use_container_width=True
+            )
+
+            numeric = data.select_dtypes(
+                include=np.number
+            )
+
             if numeric.empty:
-                st.warning("El archivo no contiene columnas numéricas para comparar.")
+
+                st.warning(
+                    "No se encontraron columnas numéricas."
+                )
+
             else:
-                st.write("Resumen estadístico descriptivo de la muestra")
-                st.dataframe(numeric.describe().T, use_container_width=True)
-                st.bar_chart(numeric.mean())
-        except Exception as e:
-            st.error(f"No se pudo leer el CSV: {e}")
+
+                st.subheader(
+                    "Resumen estadístico"
+                )
+
+                st.dataframe(
+                    numeric.describe().T,
+                    use_container_width=True
+                )
+
+                st.subheader(
+                    "Promedios de las características"
+                )
+
+                st.bar_chart(
+                    numeric.mean()
+                )
+
+        except Exception as error:
+
+            st.error(
+                f"No se pudo leer el CSV: {error}"
+            )
+
     else:
-        st.info("Aún no hay una muestra cargada. Primero reúne y procesa imágenes de referencia con consentimiento.")
+
+        st.info(
+            "Todavía no has cargado una muestra de referencia."
+        )
+
+
+# ==========================================
+# PESTAÑA 3: METODOLOGÍA
+# ==========================================
 
 with tab3:
-    st.subheader("Fundamento del procedimiento")
-    st.markdown("""
-    1. **Detección:** MediaPipe Face Landmarker localiza puntos de referencia faciales.
-    2. **Extracción:** se calculan distancias euclidianas entre puntos seleccionados.
-    3. **Normalización:** las distancias se dividen entre dimensiones faciales para reducir el efecto del tamaño de la imagen.
-    4. **Descripción estadística:** una muestra voluntaria puede resumirse mediante medias, desviaciones estándar y distribuciones.
-    5. **Comparación:** las mediciones permiten estudiar similitudes geométricas dentro de la muestra, sin inferir identidad, etnia ni procedencia.
 
-    **Limitaciones:** los resultados varían con la pose, iluminación, expresión, cámara y calidad de imagen. Este prototipo no es un instrumento de diagnóstico ni de identificación.
-    """)
-    st.write("Para una investigación rigurosa, documenta el consentimiento, los criterios de inclusión, la calidad de las imágenes y el protocolo de captura.")
+    st.header(
+        "Fundamento matemático y metodológico"
+    )
+
+    st.markdown(
+        """
+        ### 1. Detección facial
+
+        Se utiliza MediaPipe Face Landmarker para
+        localizar puntos de referencia del rostro.
+
+        ### 2. Extracción de características
+
+        Se identifican puntos faciales para calcular
+        distancias entre regiones anatómicas.
+
+        ### 3. Modelo matemático
+
+        La distancia euclidiana entre dos puntos
+        se calcula mediante:
+
+        \\[
+        d(A,B)=\\sqrt{(x_2-x_1)^2+(y_2-y_1)^2}
+        \\]
+
+        ### 4. Normalización
+
+        Las distancias se dividen entre dimensiones
+        faciales para obtener proporciones geométricas.
+
+        ### 5. Comparación estadística
+
+        Las mediciones de una muestra voluntaria
+        pueden analizarse mediante medias, desviaciones
+        estándar y distribuciones estadísticas.
+
+        ### 6. Limitaciones
+
+        Los resultados pueden variar según la pose,
+        iluminación, expresión facial y calidad de imagen.
+
+        Este prototipo no identifica personas ni demuestra
+        origen étnico o procedencia geográfica.
+        """
+    )
+
+    st.success(
+        "Proyecto académico: Amazonas Face Analysis."
+    )
+
+    st.caption(
+        "Desarrollado con Python, OpenCV, NumPy, "
+        "Pandas y MediaPipe."
+    )
+
+
+# ==========================================
+# PIE DE PÁGINA
+# ==========================================
+
+st.divider()
+
+st.caption(
+    "AMAZONAS FACE ANALYSIS | Prototipo académico"
+)
+
